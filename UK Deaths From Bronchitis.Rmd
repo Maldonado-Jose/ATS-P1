@@ -1,0 +1,208 @@
+---
+title: "UK Deaths From Bronchitis, Emphysema, and Asthma by Sex"
+subtitle: 'By: Jose Maldonado'
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+```{r, echo=FALSE, message=FALSE, warning = FALSE}
+## Packages used for this project.
+library(fpp2)
+library(ggplot2)
+library(seasonal)
+library(urca)
+library(knitr)
+library(rmarkdown)
+```
+
+###Introduction:
+
+####The following paper is on deaths in the United Kingdom from 1974 to 1979 due to bronchitis, emphysema, and asthma. All of these are respiratory problems that still exist today and were more severe in the past due to the lack of treatments.  Furthermore, all of these illnesses are worsened by smoking. From the data given, we discuss the reasons for the increase and decreases in the deaths as well as our future predictions. 
+
+###Exploring the Dataset:
+```{r, message=FALSE, warning=FALSE}
+data = read.csv("uk-deaths-from-bronchitis-emphys.csv",header=TRUE, stringsAsFactors = FALSE)
+deathsts = ts(data[,-1], start = 1974, frequency = 12)
+
+#Validating the data, checking that it matches with the excel file, and that it's not out of the normal.
+#deathsts
+summary(deathsts)
+autoplot(deathsts, ylab = "Number of Deaths") + ggtitle("UK Deaths Due to COPD")
+qqnorm(deathsts)
+qqline(deathsts)
+autoplot(log(deathsts))
+autoplot(sqrt(deathsts))
+## From the plots, there does seem to be a decreasing trend. There also appears to be similar seasonalities for both the male and female models.  The seasonal variation is consistent except for the spike in 1975. Also due to the spike in 1976 we can say that there isn't enough evidence of a cyclic behaviour.
+
+#Slpit the data set into male and female to be able to create appropriate forecast models.
+male = deathsts[, "Male"]
+female = deathsts[, "Female"]
+
+#Making sure the data/plots match the ones from before.
+autoplot(female)
+autoplot(male)
+ggseasonplot(male)
+ggseasonplot(female)
+ggsubseriesplot(male)
+ggsubseriesplot(female)
+## From the seasonal and subseries plots, we can see that there is a peak in deaths in January and February and a trough in September and August.  The data starts to increase in around September until its peak and then continues to decrease for the rest of the year. This could mean that the data would need to be seasonally differenced.
+
+ggAcf(male)
+ggAcf(female)
+## Neither the male or female models are stationary as seen from the ACF plots therefore the data needs to be seasonally differenced to become stationary. Both the male and female ACF plots show the positive lags slowly decreasing over time indicating there is a decreasing trend.
+
+ggPacf(male)
+ggPacf(female)
+## The PACF plots show spikes at the start which will be helpful when checking our ARIMA model.
+
+ggAcf(log(male))
+ggAcf(log(female))
+gglagplot(male)
+gglagplot(female)
+## The lagplots provide more evidence about the seasonality in the winter that is occurring.
+
+```
+
+###Simple Forecasting Methods:
+```{r, message=FALSE, warning=FALSE}
+male.train = subset(male, end = 59)
+male.test = subset(male, start = 60)
+female.train = subset(female, end = 59)
+female.test = subset(female, start = 60)
+## Created a test and train of the dataset where the test set is the last year of data, which is 1979.  Training set is everything before.
+
+driftfemale = rwf(female.train, drift = TRUE, h = 12)
+naivefemale = naive(female.train, h = 12)
+meanfemale = meanf(female.train, h = 12)
+snaivefemale = snaive(female.train, h = 12)
+autoplot(female)+
+  autolayer(meanfemale, series = "Mean",PI = FALSE) + 
+  autolayer(naivefemale,series = "Naive",PI=FALSE) + 
+  autolayer(driftfemale, series="Drift", PI=FALSE) +
+  autolayer(snaivefemale, series = "Seasonal Naive", PI = FALSE) + ggtitle("Female Simple Forecasts")+xlab("")+ylab("")+
+  guides(colour=guide_legend(title="Forecast"))
+## From the graph, the only method that looks reasonable is seasonal naive.  However, we will still test all methods to see their results.
+
+accuracy(snaivefemale, female.test)
+accuracy(meanfemale, female.test)
+accuracy(naivefemale, female.test)
+accuracy(driftfemale, female.test)
+## Using RMSE and MAPE, it is easy to see that the best method to use here would be seasonal naive.
+
+checkresiduals(snaivefemale)
+## From these results, we can see that the residuals are not correlated with a p-value of 0.5606. They also have a zero mean and are normally distributed.  This is an acceptable forecasting method for the female dataset.
+
+driftmale = rwf(male.train, drift = TRUE, h = 12)
+naivemale = naive(male.train, h = 12)
+meanmale = meanf(male.train, h = 12)
+snaivemale = snaive(male.train, h = 12)
+autoplot(male)+
+  autolayer(meanmale, series = "Mean",PI = FALSE) + 
+  autolayer(naivemale,series = "Naive",PI=FALSE) + 
+  autolayer(driftmale, series="Drift", PI=FALSE) +
+  autolayer(snaivemale, series = "Seasonal Naive", PI = FALSE) + ggtitle("Male Simple Forecasts")+xlab("")+ylab("")+
+  guides(colour=guide_legend(title="Forecast"))
+## Similar to the female model, the only reasonable method appears to be seasonal naive. 
+
+accuracy(snaivemale, male.test)
+accuracy(naivemale, male.test)
+accuracy(meanmale, male.test)
+accuracy(driftmale, male.test)
+## From these tests, using RMSE and MAPE, the best method, clearly, is seasonal naive.
+
+checkresiduals(snaivemale)
+## With a p-value of 0.21 the residuals seem to be correlated even though they appear to have a 0 mean. Also, the residuals are some-what normally distributed. Ultimately this is not an acceptable forecasting method, there is a better one.
+```
+
+###Decomposition of Male and Female Model Along with STL Forecast:
+```{r, message=FALSE, warning=FALSE}
+decomale = decompose(male, type = "additive")
+autoplot(decomale, main = "Classical Decomposition for Male")
+## From the classical decomposition, we can see that there is a small decreasing trend. There is more evidence of the seasonality.  However, the important information from the decomposition is the spike in 1976 in the remainder component.
+decofemale = decompose(female, type = "additive")
+autoplot(decofemale, main = "Classical Decomposition for Females")
+## The spike occurs in the remainder component in 1976 as well for the females.
+autoplot(male, series = "Data") +
+  autolayer(trendcycle(decomale), series = "Trend") +
+  autolayer(seasadj(decomale), series = "Seasonally Adjusted")
+autoplot(female, series = "Data") + 
+  autolayer(trendcycle(decofemale), series = "Trend") +
+  autolayer(seasadj(decofemale), series = "Seasonally Adjusted")
+##This lets us see the decreasing trend and the seasonality along with the original data.
+
+stlmale = stl(male, s.window = "periodic")
+autoplot(stlmale,  main = "STL Decomposition for Males")
+stlfemale = stl(female, s.window = "periodic")
+autoplot(stlfemale, main = "STL Decomposition for Females")
+## The STL decomposition of male and female data sets shows us the same results we found in the classical decomposition. Decreasing trend and heavy seasonality patterns.
+
+x11male = seas(male, x11 = "")
+autoplot(x11male, main = "X11 for Male")
+x11female = seas(female, x11 = "")
+autoplot(x11female, main = "X11 for Female")
+## The X11 decomposition just more clearly shows the results already found by the decomposition methods we used above.
+
+stlfcmale = forecast(stlmale, h = 12)
+autoplot(stlfcmale, main = "Forecast for STL for Males")
+checkresiduals(stlfcmale, main = "Residuals STL Forecast for Males")
+## The STL forecast for males has residuals that are correlated so it is thrown out.
+
+stlfcfemale = forecast(stlfemale, h = 12)
+autoplot(stlfcfemale, main = "Forecast for STL for Females")
+checkresiduals(stlfcfemale, main = "Residuals STL Forecast for Females")
+## The STL forecast for females has uncorrelated residuals and a zero mean.  However, the seasonal naive still appears to be a better forecast.  Still, this is not a bad method.
+```
+
+###ARIMA Forecasting Method
+```{R, message=FALSE, warning=FALSE}
+ndiffs(male)
+nsdiffs(male)
+## The data only needs to be seasonally differenced once.
+
+malearima = auto.arima(male, seasonal = TRUE)
+malearima
+## The model found makes sense when looking at the PACF and ACF plots for males.  The model is fairly simple so this should be suffice.
+
+malearimatrain = arima(male.train, order = c(2,0,0), 
+                        seasonal = c(1,1,1))
+malearimatest = Arima(male.test, model = malearimatrain)
+malearimatrain %>%
+  forecast(h = 12) %>%
+  autoplot() + autolayer(male.test)
+## From the plot, it can be seen that the arima forecasts is very close to the actual data.
+
+accuracy(malearimatest)
+checkresiduals(malearima)
+## From these results, a p-value of 0.70 was found from the Ljung-Box test showing the residuals are uncorrelated.  The residuals are not normally distributed but this appears to be the best forecasting method.
+
+ndiffs(female)
+nsdiffs(female)
+## The data only needs to be seasonally differenced one time.
+
+femalearima = auto.arima(female, seasonal = TRUE)
+femalearima
+femalearimatrain = arima(female.train, order = c(0,0,0), 
+                        seasonal = c(2,1,0))
+femalearimatest = Arima(female.test, model = femalearimatrain)
+femalearimatrain %>%
+  forecast(h = 12) %>%
+  autoplot() + autolayer(female.test)
+## From the plot, it can be seen that the arima forecasts is very close to the actual data.
+
+accuracy(femalearimatest)
+checkresiduals(femalearima)
+## From these results, we can see that the ARIMA model is very good with a p-value of 0.84.  Also, the accuracy of the test was very good using MAPE and MASE making this our best model for the female dataset.
+```
+
+###Forecasts for the Next Year From ARIMA Model:
+```{r, message=FALSE, warning=FALSE}
+fitmale = forecast(malearima, h = 12)
+fitfemale = forecast(femalearima, h = 12)
+autoplot(include = 24, fitmale)
+autoplot(include = 24, fitfemale)
+```
+
+###Conclusion:
+
+####The best forecasting methods for the both models is ARIMA.  For the male model, we will use an ARIMA(2,0,0)(1,1,1)[12] with drift and the female is ARIMA(0,0,0)(2,1,0)[12] with drift.  The models are pretty simple with both being only seasonally differenced once.  From these forecasts, we expect the number of deaths to increase in the winter time as explained by the model because of flare ups of these respiratory problems.  Furthermore, the only real difference between the male and female model is that males have a larger amount of deaths.  Chronic Obstructive Pulmonary Disease (COPD) has been proven to worsen in the winter for patients causing an increase in the number of deaths. However, the reason for more male deaths than female deaths remains unknown.  It does not appear to be the correlation of deaths from the Vietnam War because the war ended in 1975.  Recent studies have shown that women are more likely to have respiratory diseases than men, which does not support this data.  It may have been due to the generations of World War veterans dying and several soldiers were smokers.  However, further research or more information would be needed to prove this. From research it was found that starting 1962 the Ministry of Health began to change their stance around smoking not leading to serious health problems. A combination of that and campaings being ran to educate the public about the harm that smoking has on your health also explain why the trend was decreasing.
