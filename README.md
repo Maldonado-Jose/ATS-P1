@@ -8,7 +8,7 @@
 # .csv
 --- Excel file that contains the deaths from COPD from 1974-1979 for both males and females in the UK.
 
-# .docx
+# .docx --- click on view raw to download and see the final project.
 --- Word document that shows the final project. Rmarkdown was used to convert it to a .docx to be able to see both the code and it's graphs.
 
 # .Rmd
